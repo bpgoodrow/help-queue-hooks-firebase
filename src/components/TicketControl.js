@@ -1,97 +1,116 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import NewTicketForm from './NewTicketForm';
 import TicketList from './TicketList';
 import EditTicketForm from './EditTicketForm';
 import TicketDetail from './TicketDetail';
+import db from './../firebase.js';
+import { collection, addDoc, doc, updateDoc, onSnapshot, deleteDoc } from "firebase/firestore";
+import { async } from '@firebase/util';
 
-class TicketControl extends React.Component {
+function TicketControl() {
 
-  constructor(props) {
-    super(props);
-    this.state = {
-      formVisibleOnPage: false,
-      mainTicketList: [],
-      selectedTicket: null,
-      editing: false
-    };
-  }
+  const [formVisibleOnPage, setFormVisibleOnPage] = useState(false);
+  const [mainTicketList, setMainTicketList] = useState([]);
+  const [selectedTicket, setSelectedTicket] = useState(null);
+  const [editing, setEditing] = useState(false);
+  const [error, setError] = useState(null);
 
-  handleClick = () => {
-    if (this.state.selectedTicket != null) {
-      this.setState({
-        formVisibleOnPage: false,
-        selectedTicket: null,
-        editing: false
-      });
-    } else {
-      this.setState(prevState => ({
-        formVisibleOnPage: !prevState.formVisibleOnPage,
-      }));
-    }
-  }
-
-  handleDeletingTicket = (id) => {
-    const newMainTicketList = this.state.mainTicketList.filter(ticket => ticket.id !== id);
-    this.setState({
-      mainTicketList: newMainTicketList,
-      selectedTicket: null
-    });
-  }
-
-  handleEditClick = () => {
-    this.setState({editing: true});
-  }
-
-  handleEditingTicketInList = (ticketToEdit) => {
-    const editedMainTicketList = this.state.mainTicketList
-      .filter(ticket => ticket.id !== this.state.selectedTicket.id)
-      .concat(ticketToEdit);
-    this.setState({
-      mainTicketList: editedMainTicketList,
-      editing: false,
-      selectedTicket: null
-    });
-  }
-
-  handleAddingNewTicketToList = (newTicket) => {
-    const newMainTicketList = this.state.mainTicketList.concat(newTicket);
-    this.setState({mainTicketList: newMainTicketList});
-    this.setState({formVisibleOnPage: false});
-  }
-
-  handleChangingSelectedTicket = (id) => {
-    const selectedTicket = this.state.mainTicketList.filter(ticket => ticket.id === id)[0];
-    this.setState({selectedTicket: selectedTicket});
-  }
-
-  render(){
-    let currentlyVisibleState = null;
-    let buttonText = null; 
-    if (this.state.editing ) {      
-      currentlyVisibleState = <EditTicketForm ticket = {this.state.selectedTicket} onEditTicket = {this.handleEditingTicketInList} />
-      buttonText = "Return to Ticket List";
-    } else if (this.state.selectedTicket != null) {
-      currentlyVisibleState = <TicketDetail 
-      ticket={this.state.selectedTicket} 
-      onClickingDelete={this.handleDeletingTicket}
-      onClickingEdit = {this.handleEditClick} />
-      buttonText = "Return to Ticket List";
-    } else if (this.state.formVisibleOnPage) {
-      currentlyVisibleState = <NewTicketForm onNewTicketCreation={this.handleAddingNewTicketToList}/>;
-      buttonText = "Return to Ticket List"; 
-    } else {
-      currentlyVisibleState = <TicketList onTicketSelection={this.handleChangingSelectedTicket} ticketList={this.state.mainTicketList} />;
-      buttonText = "Add Ticket"; 
-    }
-    return (
-      <React.Fragment>
-        {currentlyVisibleState}
-        <button onClick={this.handleClick}>{buttonText}</button> 
-      </React.Fragment>
+  useEffect(() => { 
+    const unSubscribe = onSnapshot(
+      collection(db, "tickets"), 
+      (collectionSnapshot) => {
+        const tickets = [];
+        collectionSnapshot.forEach((doc) => {
+          tickets.push({
+            names: doc.data().names,
+            location: doc.data().location,
+            issue: doc.data().issue,
+            id: doc.id
+          });
+        });
+        setMainTicketList(tickets);
+      }, 
+      (error) => {
+        setError(error.message);
+      }
     );
+
+    return () => unSubscribe();
+  }, []);
+
+  const handleClick = () => {
+    if (selectedTicket != null) {
+      setFormVisibleOnPage(false);
+      setSelectedTicket(null);
+      setEditing(false);
+    } else {
+      setFormVisibleOnPage(!formVisibleOnPage);
+    }
   }
+
+  const handleDeletingTicket = async (id) => {
+    await deleteDoc(doc(db, "tickets", id));
+    setSelectedTicket(null);
+  }
+
+  const handleEditClick = () => {
+    setEditing(true);
+  }
+
+  const handleEditingTicketInList = async (ticketToEdit) => {
+    const ticketRef = doc(db, "tickets", ticketToEdit.id);
+      await updateDoc(ticketRef, ticketToEdit);
+    setEditing(false);
+    setSelectedTicket(null);
+  }
+
+  const handleAddingNewTicketToList = async (newTicketData) => {
+    await addDoc(collection(db, "tickets"), newTicketData);
+    setFormVisibleOnPage(false);
+  }
+
+  const handleChangingSelectedTicket = (id) => {
+    const selection = mainTicketList.filter(ticket => ticket.id === id)[0];
+    setSelectedTicket(selection);
+  }
+
+  let currentlyVisibleState = null;
+  let buttonText = null;
+
+  if (error) {
+    currentlyVisibleState = <p>There was an error: {error}</p>
+  }
+  else if (editing) {      
+    currentlyVisibleState =
+      <EditTicketForm
+      ticket = {selectedTicket}
+      onEditTicket = {handleEditingTicketInList} />
+    buttonText = "Return to Ticket List";
+  } else if (selectedTicket != null) {
+    currentlyVisibleState =
+    <TicketDetail 
+      ticket={selectedTicket} 
+      onClickingDelete={handleDeletingTicket}
+      onClickingEdit = {handleEditClick} />
+    buttonText = "Return to Ticket List";
+  } else if (formVisibleOnPage) {
+    currentlyVisibleState = <NewTicketForm onNewTicketCreation={handleAddingNewTicketToList}/>;
+    buttonText = "Return to Ticket List"; 
+  } else {
+    currentlyVisibleState =
+      <TicketList
+        onTicketSelection={handleChangingSelectedTicket}
+        ticketList={mainTicketList} />;
+    buttonText = "Add Ticket"; 
+  }
+  return (
+    <React.Fragment>
+      {currentlyVisibleState}
+      {error ? null : <button onClick={handleClick}>{buttonText}</button>}
+    </React.Fragment>
+  );
+  
 
 }
 
 export default TicketControl;
-
